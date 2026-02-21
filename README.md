@@ -1,3 +1,14 @@
+# FnPcZn Spectral Atlas
+
+Live production URL: https://dadspaper.vercel.app
+
+This repository hosts a React + TypeScript + Vite single-page app for visualizing
+spectral and structural trends from:
+“Spectral properties, electronic states, and aggregation of highly-fluorinated zinc phthalocyanines”
+(Chan et al., 2025; DOI: 10.1142/S1088424625501093).
+
+---
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
