@@ -1,123 +1,68 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { GLViewer } from '3dmol'
 import { Atom, Database, FlaskConical, Orbit } from 'lucide-react'
-
-const LEVELS = ['F16', 'F40', 'F52', 'F64'] as const
-
-export type FluorinationLevel = (typeof LEVELS)[number]
-
-type LevelMeta = {
-  code: string
-  formula: string
-  fluorines: number
-  crowding: string
-  aggregation: string
-  symmetry: string
-  source: string
-}
-
-const MODEL_FILES: Record<FluorinationLevel, string> = {
-  F16: '/structures/F16.sdf',
-  F40: '/structures/F40.sdf',
-  F52: '/structures/F52.sdf',
-  F64: '/structures/F64.sdf',
-}
-
-const LEVEL_META: Record<FluorinationLevel, LevelMeta> = {
-  F16: {
-    code: 'F16PcZn',
-    formula: 'C32F16N8Zn',
-    fluorines: 16,
-    crowding: 'Low steric crowding around the macrocycle perimeter.',
-    aggregation: 'Higher dimer tendency via π-π stacking interactions.',
-    symmetry: 'Near D4h-like benchmark scaffold in idealized form.',
-    source: 'PubChem CID 11377956 (direct SDF molecular graph).',
-  },
-  F40: {
-    code: 'F40PcZn',
-    formula: 'C44F40N8Zn',
-    fluorines: 40,
-    crowding: 'Bulky heptafluoropropan-2-yl groups create clear steric shielding.',
-    aggregation: 'Mixed monomer/dimer behavior with broadened Q-region features.',
-    symmetry: 'C2v-like substitution pattern used for derived model.',
-    source: 'Derived from F64 topology by removing 4 bulky groups and restoring aromatic F.',
-  },
-  F52: {
-    code: 'F52PcZn',
-    formula: 'C50F52N8Zn',
-    fluorines: 52,
-    crowding: 'Denser bulky-group coverage increases out-of-plane congestion.',
-    aggregation: 'Lower dimer fraction than F16/F40 in solution.',
-    symmetry: 'C2v-like substitution pattern used for derived model.',
-    source: 'Derived from F64 topology by removing 2 bulky groups and restoring aromatic F.',
-  },
-  F64: {
-    code: 'F64PcZn',
-    formula: 'C56F64N8Zn',
-    fluorines: 64,
-    crowding: 'Maximum peripheral congestion from 8 bulky heptafluoropropan-2-yl groups.',
-    aggregation: 'Predominantly monomeric behavior under reported conditions.',
-    symmetry: 'Nominal D4h-like parent arrangement with maximal steric shielding.',
-    source: 'PubChem CID 9964044 (direct SDF molecular graph).',
-  },
-}
+import { moleculeEntries, moleculeModes } from '../data/molecules'
+import { EvidenceRow } from './EvidenceRow'
 
 export function MolecularViewer() {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const viewerRef = useRef<GLViewer | null>(null)
 
-  const [selectedIndex, setSelectedIndex] = useState(0)
+  const [mode, setMode] = useState<(typeof moleculeModes)[number]['id']>('monomer')
+  const [selectedId, setSelectedId] = useState('F16')
   const [isSpinning, setIsSpinning] = useState(true)
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [modelMap, setModelMap] = useState<Record<FluorinationLevel, string>>({
-    F16: '',
-    F40: '',
-    F52: '',
-    F64: '',
-  })
+  const [status, setStatus] = useState<'booting' | 'ready' | 'error'>('booting')
+  const [modelMap, setModelMap] = useState<Record<string, string>>({})
 
-  const selectedLevel = LEVELS[selectedIndex]
-  const selectedMeta = LEVEL_META[selectedLevel]
+  const modeEntries = useMemo(() => {
+    if (mode === 'reference') {
+      return moleculeEntries.filter((entry) => entry.id === 'H16' || entry.id === 'F16' || entry.id === 'F64')
+    }
+    return moleculeEntries.filter((entry) => entry.category === mode)
+  }, [mode])
+
+  const selectedEntry =
+    modeEntries.find((entry) => entry.id === selectedId) ??
+    modeEntries[0] ??
+    moleculeEntries[0]!
 
   useEffect(() => {
+    if (!modeEntries.length) {
+      return
+    }
+    if (!modeEntries.some((entry) => entry.id === selectedId)) {
+      setSelectedId(modeEntries[0].id)
+    }
+  }, [modeEntries, selectedId])
+
+  useEffect(() => {
+    if (!selectedEntry || modelMap[selectedEntry.id]) {
+      return
+    }
     let mounted = true
 
-    const loadModels = async () => {
+    const loadModel = async () => {
       try {
-        const entries = await Promise.all(
-          LEVELS.map(async (level) => {
-            const response = await fetch(MODEL_FILES[level])
-            if (!response.ok) {
-              throw new Error(`Failed to load ${MODEL_FILES[level]}`)
-            }
-            const sdf = await response.text()
-            return [level, sdf] as const
-          }),
-        )
-
+        const response = await fetch(selectedEntry.file)
+        if (!response.ok) {
+          throw new Error(`Failed to load ${selectedEntry.file}`)
+        }
+        const sdf = await response.text()
         if (!mounted) {
           return
         }
-
-        setModelMap(
-          entries.reduce<Record<FluorinationLevel, string>>(
-            (accumulator, [level, sdf]) => ({ ...accumulator, [level]: sdf }),
-            { F16: '', F40: '', F52: '', F64: '' },
-          ),
-        )
+        setModelMap((current) => ({ ...current, [selectedEntry.id]: sdf }))
       } catch {
         if (mounted) {
           setStatus('error')
         }
       }
     }
-
-    void loadModels()
-
+    void loadModel()
     return () => {
       mounted = false
     }
-  }, [])
+  }, [selectedEntry, modelMap])
 
   useEffect(() => {
     let mounted = true
@@ -142,7 +87,7 @@ export function MolecularViewer() {
         })
         observer.observe(containerRef.current)
 
-        setStatus((current) => (current === 'error' ? current : 'ready'))
+        setStatus('ready')
       } catch {
         setStatus('error')
       }
@@ -162,11 +107,11 @@ export function MolecularViewer() {
   }, [])
 
   useEffect(() => {
-    if (status !== 'ready' || !viewerRef.current) {
+    if (status !== 'ready' || !viewerRef.current || !selectedEntry) {
       return
     }
 
-    const sdf = modelMap[selectedLevel]
+    const sdf = modelMap[selectedEntry.id]
     if (!sdf) {
       return
     }
@@ -185,9 +130,10 @@ export function MolecularViewer() {
       },
     )
     viewer.setStyle({ elem: 'Zn' }, { sphere: { radius: 0.62, color: '#86a6ff' } })
+    viewer.setStyle({ elem: 'H' }, { sphere: { radius: 0.2, color: '#f8f7fc' }, stick: { radius: 0.06, color: '#f8f7fc' } })
     viewer.zoomTo()
     viewer.render()
-  }, [modelMap, selectedLevel, status])
+  }, [modelMap, selectedEntry, status])
 
   useEffect(() => {
     if (!viewerRef.current || status !== 'ready') {
@@ -197,14 +143,6 @@ export function MolecularViewer() {
     viewerRef.current.spin(isSpinning ? 'y' : false, 0.18)
   }, [isSpinning, status])
 
-  const handleSliderChange = (value: string) => {
-    const numberValue = Number(value)
-    if (Number.isNaN(numberValue)) {
-      return
-    }
-    setSelectedIndex(Math.min(Math.max(numberValue, 0), LEVELS.length - 1))
-  }
-
   return (
     <section id="viewer" className="glass-panel relative overflow-hidden rounded-3xl p-6 md:p-8">
       <div className="spark spark-a" />
@@ -213,32 +151,48 @@ export function MolecularViewer() {
       <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="space-y-2">
           <p className="font-mono text-xs tracking-[0.25em] text-cyan-200/80">DATA-DRIVEN MOLECULAR EXPLORER</p>
-          <h2 className="text-2xl font-semibold text-white md:text-3xl">FnPcZn Structural Progression (SDF Models)</h2>
+          <h2 className="text-2xl font-semibold text-white md:text-3xl">FnPcZn Molecular Suite (Monomer / Dimer / Reference)</h2>
           <p className="max-w-3xl text-sm text-slate-200/85 md:text-base">
-            Interactive comparison of F16, F40, F52, and F64 zinc phthalocyanines using explicit atom/bond molecular graphs, with
-            increasing bulky-group loading reflected by stronger peripheral congestion.
+            Dataset-driven viewer for the full paper scope: monomers (F16/F40/F52/F64), dimers (F16D/F40D), and the H16 reference.
+            Provenance badges distinguish direct public structures from derived assemblies.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setIsSpinning((current) => !current)}
-          className="inline-flex items-center justify-center rounded-xl border border-cyan-200/35 bg-slate-900/40 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:border-cyan-200/65 hover:bg-slate-900/70"
-        >
-          {isSpinning ? 'Pause Rotation' : 'Resume Rotation'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {moleculeModes.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setMode(item.id)}
+              className={`rounded-xl px-3 py-2 text-xs font-semibold tracking-[0.08em] transition ${
+                mode === item.id
+                  ? 'border border-cyan-100/70 bg-cyan-300/18 text-cyan-100'
+                  : 'border border-cyan-100/25 bg-slate-900/40 text-cyan-100/80 hover:border-cyan-100/50 hover:text-cyan-100'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setIsSpinning((current) => !current)}
+            className="inline-flex items-center justify-center rounded-xl border border-cyan-200/35 bg-slate-900/40 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:border-cyan-200/65 hover:bg-slate-900/70"
+          >
+            {isSpinning ? 'Pause Rotation' : 'Resume Rotation'}
+          </button>
+        </div>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
         <div className="relative min-h-[70vh] overflow-hidden rounded-2xl border border-cyan-100/20 bg-slate-950/30">
           <div ref={containerRef} className="h-full w-full" />
 
-          {(status !== 'ready' || !modelMap[selectedLevel]) ? (
+          {(status !== 'ready' || !modelMap[selectedEntry.id]) ? (
             <div className="absolute inset-0 grid place-items-center bg-slate-950/85 text-center">
               <p className="font-mono text-sm text-cyan-100/85">
                 {status === 'error'
                   ? 'Model loading failed. Check structure files.'
-                  : 'Loading SDF structures...'}
+                  : 'Loading selected structure...'}
               </p>
             </div>
           ) : null}
@@ -246,65 +200,63 @@ export function MolecularViewer() {
 
         <aside className="space-y-4 rounded-2xl border border-cyan-100/20 bg-slate-950/55 p-5 backdrop-blur-xl">
           <div className="space-y-3">
-            <label htmlFor="fluorination-slider" className="font-mono text-xs tracking-[0.2em] text-cyan-100/80">
-              Fluorination Level
-            </label>
-            <input
-              id="fluorination-slider"
-              type="range"
-              min={0}
-              max={LEVELS.length - 1}
-              step={1}
-              value={selectedIndex}
-              onChange={(event) => handleSliderChange(event.target.value)}
-              className="h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-700/70 accent-cyan-300"
-            />
-            <div className="flex items-center justify-between text-xs text-cyan-100/70">
-              {LEVELS.map((level) => (
+            <p className="font-mono text-xs tracking-[0.2em] text-cyan-100/80">Model Selector</p>
+            <div className="grid grid-cols-2 gap-2">
+              {modeEntries.map((entry) => (
                 <button
-                  key={level}
+                  key={entry.id}
                   type="button"
-                  onClick={() => setSelectedIndex(LEVELS.indexOf(level))}
-                  className={`rounded-lg px-2 py-1 font-mono transition ${
-                    level === selectedLevel
+                  onClick={() => setSelectedId(entry.id)}
+                  className={`rounded-lg px-2 py-1.5 text-left text-xs font-mono transition ${
+                    entry.id === selectedEntry.id
                       ? 'bg-cyan-300/20 text-cyan-100 ring-1 ring-cyan-200/45'
-                      : 'text-cyan-100/70 hover:bg-slate-800/70 hover:text-cyan-100'
+                      : 'bg-slate-900/40 text-cyan-100/75 hover:bg-slate-800/70 hover:text-cyan-100'
                   }`}
                 >
-                  {level}
+                  {entry.label}
                 </button>
               ))}
             </div>
           </div>
 
           <div className="space-y-3 rounded-xl border border-slate-700/60 bg-slate-900/55 p-4">
-            <p className="font-mono text-xs uppercase tracking-[0.2em] text-emerald-200/80">{selectedMeta.code}</p>
-            <p className="font-mono text-xs text-cyan-100/85">{selectedMeta.formula}</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-mono text-xs uppercase tracking-[0.2em] text-emerald-200/80">{selectedEntry.label}</p>
+              <span
+                className={`rounded-full px-2 py-1 font-mono text-[10px] uppercase tracking-[0.14em] ${
+                  selectedEntry.provenance === 'direct'
+                    ? 'border border-emerald-200/35 bg-emerald-300/10 text-emerald-100'
+                    : 'border border-amber-200/35 bg-amber-300/10 text-amber-100'
+                }`}
+              >
+                {selectedEntry.provenance}
+              </span>
+            </div>
+            <p className="font-mono text-xs text-cyan-100/85">{selectedEntry.formula}</p>
             <ul className="space-y-2 text-sm text-slate-200">
               <li className="flex items-start gap-2">
                 <Atom className="mt-0.5 h-4 w-4 text-cyan-300" />
-                <span>{selectedMeta.fluorines} fluorine atoms in the molecular formula.</span>
+                <span>{selectedEntry.summary}</span>
               </li>
               <li className="flex items-start gap-2">
                 <Orbit className="mt-0.5 h-4 w-4 text-emerald-300" />
-                <span>{selectedMeta.crowding}</span>
+                <span>Mode: {mode === 'reference' ? 'Reference comparison set' : mode}</span>
               </li>
               <li className="flex items-start gap-2">
                 <FlaskConical className="mt-0.5 h-4 w-4 text-indigo-300" />
-                <span>{selectedMeta.aggregation}</span>
+                <span>File: {selectedEntry.file}</span>
               </li>
               <li className="flex items-start gap-2">
                 <Database className="mt-0.5 h-4 w-4 text-violet-300" />
-                <span>{selectedMeta.source}</span>
+                <span>{selectedEntry.source}</span>
               </li>
             </ul>
-            <p className="text-sm text-slate-300">{selectedMeta.symmetry}</p>
+            <EvidenceRow refs={selectedEntry.evidenceRefs} />
           </div>
 
           <p className="text-xs text-slate-400">
-            Accuracy note: F16 and F64 are direct PubChem molecular graphs. F40 and F52 are chemistry-consistent derived intermediates
-            from the same scaffold because public coordinate deposits for those specific species are access-gated in CCDC/supplemental
-            sources.
+            Accuracy note: some models are derived where direct deposited coordinates were unavailable from open sources. Derived models
+            are tagged and used only as chemistry-consistent visualization surrogates.
           </p>
         </aside>
       </div>
